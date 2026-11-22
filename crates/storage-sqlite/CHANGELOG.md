@@ -22,6 +22,9 @@
 
 ### Changed
 
+- A new account database applies its schema through migration 218 in one transaction from a checked-in baseline,
+  then replays only later migrations. Opening a fresh account no longer replays every migration, which took seconds.
+  Databases with any recorded migration are unchanged.
 - Thread messages (kind 1111 with a parent) count as chat activity: chat-list preview, order, unread and mention
   counts, and the message-text filter. The chat-list projection version moves to 5, so every row is rebuilt once.
   A new thread message reaches live subscribers as `TimelineUpdateTrigger::NewMessage`, not `CustomEvent`, and an
