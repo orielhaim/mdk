@@ -174,6 +174,34 @@ independently delete it when delivery finishes. Later edits and failed acceptanc
 remain intact. The local attachment accessor distinguishes missing bytes from an
 empty attachment and refuses stale revisions.
 
+### Saved drafts
+
+`group_message_drafts` lists the active and saved drafts for one conversation,
+newest first, with the opaque draft ID breaking timestamp ties. List previews
+include up to 1,024 characters and basic attachment metadata. The legacy
+account-wide list and the chat list continue to describe active composers.
+Use `identified_message_draft` for an individual entry and
+`read_identified_message_draft_attachment` for bounded reads of its attachment
+bytes. IDs and revisions are scoped to the account-device and conversation.
+
+Flush pending composer edits and pass the selected revision to
+`archive_message_draft` to park the composition. The next save creates a new
+active draft. Pass the current revision and a saved ID to
+`activate_message_draft` to select it. MDK parks any existing active draft and
+restores the selected draft in the same transaction. These operations preserve
+draft IDs, timestamps, reply targets and attachment ownership. Reload selection
+when a revision conflicts or the outcome of a write is unknown.
+`delete_saved_message_draft` removes only an inactive draft. The regular clear
+and accepted send paths affect only the active draft.
+
+A conversation can retain sixteen saved drafts plus its active draft. Each
+draft permits up to 64 attachments and 900 MiB of text and attachment bytes.
+The group budget is 256 attachments and 2 GiB of text and attachment bytes.
+Individual file and upload limits also apply. Excess writes are refused with
+the existing drafts intact. The state lives in encrypted local storage and
+never syncs or goes on the wire. Older builds need an account database backup
+from before the schema upgrade to roll back.
+
 ### File-backed attachments
 
 Large picks (video, audio, documents) go into the draft as files, up to the

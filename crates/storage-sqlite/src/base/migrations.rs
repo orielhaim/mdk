@@ -417,6 +417,8 @@ mod migration_0217_untyped_thread_messages;
 mod migration_0218_retired_agent_text_streams;
 #[path = "migrations/0219_agent_item_order.rs"]
 mod migration_0219_agent_item_order;
+#[path = "migrations/0220_saved_message_drafts.rs"]
+mod migration_0220_saved_message_drafts;
 
 const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -1585,6 +1587,12 @@ const MIGRATIONS: &[Migration] = &[
         name: "0219_agent_item_order",
         suspend_foreign_keys: &[],
         apply: migration_0219_agent_item_order::apply,
+    },
+    Migration {
+        version: 220,
+        name: "0220_saved_message_drafts",
+        suspend_foreign_keys: &[],
+        apply: migration_0220_saved_message_drafts::apply,
     },
 ];
 

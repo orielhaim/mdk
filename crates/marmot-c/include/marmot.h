@@ -358,6 +358,14 @@ enum MarmotStatus
    * while the group's relays stay the same (mdk#3305).
    */
   MARMOT_STATUS_NO_USABLE_RELAY = 133,
+  /**
+   * The draft does not exist in the requested group and state.
+   */
+  MARMOT_STATUS_UNKNOWN_MESSAGE_DRAFT = 134,
+  /**
+   * The local saved-draft or attachment quota would be exceeded.
+   */
+  MARMOT_STATUS_MESSAGE_DRAFT_QUOTA_EXCEEDED = 135,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -1212,6 +1220,14 @@ typedef enum MarmotPublicEventPreviewState {
    */
   MARMOT_PUBLIC_EVENT_PREVIEW_STATE_UNSUPPORTED,
 } MarmotPublicEventPreviewState;
+
+/**
+ * Whether a draft is in the composer or saved for later.
+ */
+typedef enum MarmotMessageDraftState {
+  MARMOT_MESSAGE_DRAFT_STATE_ACTIVE,
+  MARMOT_MESSAGE_DRAFT_STATE_SAVED,
+} MarmotMessageDraftState;
 
 /**
  * Where a prepared group image sits in the upload lifecycle.
@@ -5072,8 +5088,7 @@ typedef struct MarmotMessageDraftAttachmentSummary {
 } MarmotMessageDraftAttachmentSummary;
 
 /**
- * One draft as listed across the account: attachment metadata only,
- * so listing every draft does not materialize their bytes.
+ * One draft summary with attachment metadata and no attachment bodies.
  */
 typedef struct MarmotMessageDraftSummary {
   char *group_id_hex;
@@ -5092,6 +5107,30 @@ typedef struct MarmotMessageDraftSummaryList {
   struct MarmotMessageDraftSummary *items;
   uintptr_t len;
 } MarmotMessageDraftSummaryList;
+
+/**
+ * Opaque local draft identifier. Use with the originating account and group.
+ */
+typedef struct MarmotMessageDraftId {
+  char *hex;
+} MarmotMessageDraftId;
+
+/**
+ * One entry in the group draft list, with bounded text and attachment metadata.
+ */
+typedef struct MarmotIdentifiedMessageDraftSummary {
+  struct MarmotMessageDraftId id;
+  enum MarmotMessageDraftState state;
+  struct MarmotMessageDraftSummary summary;
+} MarmotIdentifiedMessageDraftSummary;
+
+/**
+ *Owned list; free the root with its `_free` function only.
+ */
+typedef struct MarmotIdentifiedMessageDraftSummaryList {
+  struct MarmotIdentifiedMessageDraftSummary *items;
+  uintptr_t len;
+} MarmotIdentifiedMessageDraftSummaryList;
 
 /**
  * One attachment staged in a draft, with its plaintext bytes.
@@ -7809,6 +7848,15 @@ typedef struct MarmotConversationWindowSnapshot {
   bool has_more_before;
   bool has_more_after;
 } MarmotConversationWindowSnapshot;
+
+/**
+ * Full draft text and reply/attachment descriptors, without attachment bodies.
+ */
+typedef struct MarmotIdentifiedMessageDraft {
+  struct MarmotMessageDraftId id;
+  enum MarmotMessageDraftState state;
+  struct MarmotSelectedMessageDraftContent content;
+} MarmotIdentifiedMessageDraft;
 
 /**
  * One attachment of `marmot_save_message_draft_inputs_if_revision`.
@@ -11639,7 +11687,7 @@ MarmotStatus marmot_resolve_public_event_preview(const struct MarmotClient *clie
                                                  struct MarmotPublicEventPreview **out);
 
 /**
- * Every stored draft for the account, attachment metadata only.
+ * Active composer drafts for the account, attachment metadata only.
  * Free with `marmot_message_draft_summary_list_free`.
  *
  * # Safety
@@ -11651,6 +11699,21 @@ MarmotStatus marmot_resolve_public_event_preview(const struct MarmotClient *clie
 MarmotStatus marmot_message_drafts(const struct MarmotClient *client,
                                    const char *account_ref,
                                    struct MarmotMessageDraftSummaryList **out);
+
+/**
+ * Active and saved drafts for one group, newest first. Free with
+ * `marmot_identified_message_draft_summary_list_free`.
+ *
+ * # Safety
+ * `client` must be a live handle; string arguments must be valid
+ * NUL-terminated strings (nullable ones may be NULL); array
+ * arguments must hold their stated length (or be NULL with
+ * length 0); out-pointers must be valid.
+ */
+MarmotStatus marmot_group_message_drafts(const struct MarmotClient *client,
+                                         const char *account_ref,
+                                         const char *group_id_hex,
+                                         struct MarmotIdentifiedMessageDraftSummaryList **out);
 
 /**
  * The stored draft for one conversation, with attachment bytes;
@@ -15158,6 +15221,51 @@ MarmotStatus marmot_selected_message_draft(const struct MarmotClient *client,
                                            struct MarmotSelectedMessageDraft **out);
 
 /**
+ * Read a draft's full text and descriptors without changing the composer.
+ * Free the result with marmot_identified_message_draft_free.
+ * # Safety
+ * Client and strings valid, out writable. The id is borrowed.
+ */
+MarmotStatus marmot_identified_message_draft(const struct MarmotClient *client,
+                                             const char *account_ref,
+                                             const char *group_id_hex,
+                                             const char *draft_id_hex,
+                                             struct MarmotIdentifiedMessageDraft **out);
+
+/**
+ * Save the exact composer revision and leave the composer empty.
+ * Free the returned ID with marmot_message_draft_id_free.
+ * # Safety
+ * Client, account and revision valid, out writable. Revision's owning draft stays live.
+ */
+MarmotStatus marmot_archive_message_draft(const struct MarmotClient *client,
+                                          const char *account_ref,
+                                          const struct MarmotMessageDraftRevision *revision,
+                                          struct MarmotMessageDraftId **out);
+
+/**
+ * Resume a saved draft and park the current composer in the same transaction.
+ * Free the result with marmot_selected_message_draft_free.
+ * # Safety
+ * Client, strings and revision valid, out writable. Revision's owning draft stays live.
+ */
+MarmotStatus marmot_activate_message_draft(const struct MarmotClient *client,
+                                           const char *account_ref,
+                                           const struct MarmotMessageDraftRevision *revision,
+                                           const char *draft_id_hex,
+                                           struct MarmotSelectedMessageDraft **out);
+
+/**
+ * Remove the identified saved draft from this group.
+ * # Safety
+ * Client and strings valid for the call.
+ */
+MarmotStatus marmot_delete_saved_message_draft(const struct MarmotClient *client,
+                                               const char *account_ref,
+                                               const char *group_id_hex,
+                                               const char *draft_id_hex);
+
+/**
  * Compare an opaque chat-list draft version with a selected revision.
  * Returns zero for a foreign store/group or a newer draft.
  * # Safety
@@ -15269,6 +15377,24 @@ MarmotStatus marmot_read_message_draft_attachment(const struct MarmotClient *cli
                                                   uint8_t *out_found,
                                                   uint8_t **out_data,
                                                   uintptr_t *out_len);
+
+/**
+ * Blocking local read of 1..=1048576 bytes from an active or saved draft.
+ * found=0 means the attachment is absent. found=1 with zero bytes means EOF.
+ * Free returned bytes with marmot_bytes_free.
+ * # Safety
+ * Client and strings valid, all out pointers writable.
+ */
+MarmotStatus marmot_read_identified_message_draft_attachment(const struct MarmotClient *client,
+                                                             const char *account_ref,
+                                                             const char *group_id_hex,
+                                                             const char *draft_id_hex,
+                                                             const char *attachment_id,
+                                                             uint64_t offset,
+                                                             uint32_t limit,
+                                                             uint8_t *out_found,
+                                                             uint8_t **out_data,
+                                                             uintptr_t *out_len);
 
 /**
  * marmot_open_attachment_handoff for one draft attachment: a plaintext copy
@@ -15736,6 +15862,35 @@ void marmot_message_draft_summary_free(struct MarmotMessageDraftSummary *ptr);
  * library.
  */
 void marmot_message_draft_summary_list_free(struct MarmotMessageDraftSummaryList *list);
+
+/**
+ * Free a value of this type returned by this library. NULL
+ * is a no-op.
+ *
+ * # Safety
+ * The pointer must be NULL or an unfreed pointer returned by
+ * this library.
+ */
+void marmot_message_draft_id_free(struct MarmotMessageDraftId *ptr);
+
+/**
+ * Free a list returned by this library. NULL is a no-op.
+ *
+ * # Safety
+ * `list` must be NULL or an unfreed pointer returned by this
+ * library.
+ */
+void marmot_identified_message_draft_summary_list_free(struct MarmotIdentifiedMessageDraftSummaryList *list);
+
+/**
+ * Free a value of this type returned by this library. NULL
+ * is a no-op.
+ *
+ * # Safety
+ * The pointer must be NULL or an unfreed pointer returned by
+ * this library.
+ */
+void marmot_identified_message_draft_free(struct MarmotIdentifiedMessageDraft *ptr);
 
 /**
  * Free a value of this type returned by this library. NULL

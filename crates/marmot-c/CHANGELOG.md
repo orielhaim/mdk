@@ -16,6 +16,8 @@ Versions track the workspace version; releases are tagged `marmotc-v<version>`.
 
 ### Added
 
+- A group can keep multiple local composer drafts. The C API can list, inspect, save, resume and discard
+  drafts by ID, read their attachment chunks, and distinguish missing drafts from local quota failures.
 - `MarmotAgentItem` and `MarmotAgentItemState`: the latest version of a kind-1201 agent item on its timeline row.
 - `marmot_send_custom_event_with_client_token`: durable token admission of a custom application event, such as an
   answer or a control for an agent (kind 1202).

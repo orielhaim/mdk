@@ -2986,6 +2986,8 @@ fn app_error_kind(error: &AppError) -> &str {
         AppError::GroupInviteNotPending => "group_invite_not_pending",
         AppError::UserBlocked => "user_blocked",
         AppError::MessageDraftRevisionConflict => "message_draft_revision_conflict",
+        AppError::UnknownMessageDraft => "unknown_message_draft",
+        AppError::MessageDraftQuotaExceeded => "message_draft_quota_exceeded",
         AppError::MissingKeyPackage { .. } => "missing_key_package",
         AppError::MissingMemberInboxRoute(_) => "missing_member_inbox_route",
         AppError::DirectoryLookupIncomplete(_) => "directory_lookup_incomplete",
@@ -3100,6 +3102,7 @@ fn app_error(error: AppError) -> SubjectError {
         | AppError::BlobStore(_)
         | AppError::MediaUploadTimedOut
         | AppError::MediaDownloadFailed(_)
+        | AppError::MessageDraftQuotaExceeded
         | AppError::AuditLogUpload(_)
         | AppError::ExternalSignerUnavailable(_)
         | AppError::StickerRelay(_)
@@ -3113,6 +3116,7 @@ fn app_error(error: AppError) -> SubjectError {
         | AppError::InvalidCachedIdentityPage(_)
         | AppError::InvalidPublicEventReferences(_)
         | AppError::InvalidMessageDraft(_)
+        | AppError::UnknownMessageDraft
         | AppError::InvalidPublicKey
         | AppError::UnexpectedPrivateKey
         | AppError::IdentityKeyMismatch

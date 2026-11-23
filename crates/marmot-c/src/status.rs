@@ -244,6 +244,10 @@ pub enum MarmotStatus {
     /// Nothing was sent; a commit rolled back. Retrying fails the same way
     /// while the group's relays stay the same (mdk#3305).
     NoUsableRelay = 133,
+    /// The draft does not exist in the requested group and state.
+    UnknownMessageDraft = 134,
+    /// The local saved-draft or attachment quota would be exceeded.
+    MessageDraftQuotaExceeded = 135,
 }
 
 thread_local! {
@@ -362,6 +366,8 @@ pub(crate) fn status_from_error(err: &MarmotKitError) -> MarmotStatus {
         MarmotKitError::GroupHydrationPending { .. } => MarmotStatus::GroupHydrationPending,
         MarmotKitError::InvalidChatPin { .. } => MarmotStatus::InvalidChatPin,
         MarmotKitError::InvalidMessageDraft { .. } => MarmotStatus::InvalidMessageDraft,
+        MarmotKitError::UnknownMessageDraft => MarmotStatus::UnknownMessageDraft,
+        MarmotKitError::MessageDraftQuotaExceeded => MarmotStatus::MessageDraftQuotaExceeded,
         MarmotKitError::InvalidAppComponent { .. } => MarmotStatus::InvalidAppComponent,
         MarmotKitError::InvalidMediaReference { .. } => MarmotStatus::InvalidMediaReference,
         MarmotKitError::MediaReferenceStaleEpoch { .. } => MarmotStatus::MediaReferenceStaleEpoch,
@@ -643,6 +649,8 @@ mod tests {
             },
             MarmotKitError::ReactionNotFound,
             MarmotKitError::NoUsableRelay,
+            MarmotKitError::UnknownMessageDraft,
+            MarmotKitError::MessageDraftQuotaExceeded,
             MarmotKitError::MemberNotInGroup {
                 group_id_hex: "aa".into(),
                 member_id_hex: "bb".into(),
@@ -833,6 +841,14 @@ mod tests {
             133
         );
         assert_eq!(take_last_error().as_deref(), Some("no usable relay"));
+        assert_eq!(
+            status_from_error(&MarmotKitError::UnknownMessageDraft) as i32,
+            134
+        );
+        assert_eq!(
+            status_from_error(&MarmotKitError::MessageDraftQuotaExceeded) as i32,
+            135
+        );
         assert_eq!(
             status_from_error(&MarmotKitError::GroupRecoverySourceMismatch {
                 group_id_hex: "aa".into(),

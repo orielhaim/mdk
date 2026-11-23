@@ -222,7 +222,7 @@ fn conditional_mutations_reject_stale_cross_store_and_failed_attachment_edits() 
     );
     assert!(
         matches!(&duplicate, Err(MessageDraftRevisionError::Storage(StorageError::Backend(message)))
-            if message == "UNIQUE constraint failed: message_draft_attachments.group_id_hex, message_draft_attachments.attachment_id"),
+            if message == "UNIQUE constraint failed: message_draft_attachments.draft_id, message_draft_attachments.attachment_id"),
         "{duplicate:?}"
     );
     assert_eq!(
@@ -450,6 +450,11 @@ fn accepted_and_unaccepted_draft_revisions_survive_encrypted_reopen() {
         let store = SqliteAccountStorage::open_encrypted(&path, &key).unwrap();
         let app = store.app_storage();
         seed(&store);
+        app.save_message_draft(GROUP, "saved sibling", None, &[])
+            .unwrap();
+        let sibling = app
+            .archive_message_draft(&app.selected_message_draft(GROUP).unwrap().revision)
+            .unwrap();
         app.save_message_draft(GROUP, "retained", None, &[attachment()])
             .unwrap();
         let selected = app.selected_message_draft(GROUP).unwrap();
@@ -469,6 +474,12 @@ fn accepted_and_unaccepted_draft_revisions_survive_encrypted_reopen() {
             .selected_message_draft(GROUP)
             .unwrap();
         assert_eq!(now.draft.is_none(), accepted);
+        let saved = reopened
+            .app_storage()
+            .identified_message_draft(GROUP, sibling)
+            .unwrap();
+        assert_eq!(saved.state, super::super::StoredMessageDraftState::Saved);
+        assert_eq!(saved.content.content, "saved sibling");
         assert_eq!(now.revision == selected.revision, !accepted);
         assert_eq!(
             !reopened

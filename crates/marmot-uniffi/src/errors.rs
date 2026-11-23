@@ -589,6 +589,10 @@ pub enum MarmotKitError {
     /// This result does not establish that other devices have caught up.
     #[error("no matching reaction to remove")]
     ReactionNotFound,
+    #[error("message draft not found in this conversation")]
+    UnknownMessageDraft,
+    #[error("message draft storage quota exceeded")]
+    MessageDraftQuotaExceeded,
 }
 
 impl From<AppError> for MarmotKitError {
@@ -744,6 +748,8 @@ impl From<&AppError> for MarmotKitError {
                 group_id_hex: group_id_hex.clone(),
             },
             AppError::MessageDraftRevisionConflict => Self::MessageDraftRevisionConflict,
+            AppError::UnknownMessageDraft => Self::UnknownMessageDraft,
+            AppError::MessageDraftQuotaExceeded => Self::MessageDraftQuotaExceeded,
             AppError::InvalidMessageDraft(details) => Self::InvalidMessageDraft {
                 details: details.clone(),
             },
