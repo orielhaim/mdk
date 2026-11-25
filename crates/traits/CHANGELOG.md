@@ -6,6 +6,14 @@
 
 - Implement `EntropySource::fill_bytes` to supply entropy (mdk#3497). The default `next_u64` reads eight
   little-endian bytes from that source.
+- The account inbox leaves `TransportPeeler` for the new async `InboxSealer` (mdk#3498): `peel_welcome`,
+  `wrap_welcome`, `wrap_welcome_with_metadata` and `wrap_group_recovery` are gone, and the remaining group-message
+  methods are synchronous. `SendResult`'s and `AutoPublish`'s `welcomes` are unsealed `OutboundWelcome`s; a caller
+  seals each and returns it as a `SealedWelcome`. `CgkaEngine::ingest` answers `IngestOutcome::InboxSealed` for a
+  Welcome addressed to this client, finished by the new `ingest_unsealed`; `join_welcome` takes the unsealed
+  content. `StoredMessagePayload::UnsealedWelcome` (tag 16) holds a Welcome until it is bound.
+  `WelcomeSizeCheck::oversized_welcome` takes `OutboundWelcome`s, and `TransportAdapter::size_class_over_event_len`
+  judges an event by its length.
 - `RosterTagKeyStorage` gains `renew_roster_tag_keys`, which moves the sighting time of a slot's unexpired keys in one
   step and keeps their order (mdk#3679).
 - `SendIntent::AppMessage` gains `only_to_members`: the member accounts the payload may reach. The engine checks the

@@ -8,9 +8,17 @@
   Direct callers of `Identity::load_or_generate` pass the MLS crypto provider used to generate new signers (mdk#3497).
 - `Engine::own_account_leaves_tagged_by` returns each leaf's signature key with the slot its tag read as.
 - `Engine::queue_app_message_with_audit_context` takes the intent's `only_to_members`.
+- The engine no longer seals or unseals the account inbox (mdk#3498). Sends and creates return unsealed
+  `OutboundWelcome`s; bind the sealed messages with `Engine::bind_sealed_welcomes`, together with the commit's first
+  fanout write when it has one. `ingest` stops at `IngestOutcome::InboxSealed` for a Welcome addressed to this
+  client; pass the unseal result to `ingest_unsealed` (or `ingest_unsealed_with_audit_context`).
+  `confirm_group_rejoin` takes the unsealed offer (read it with `stored_welcome`), and
+  `retry_rejoins_after_trusted_removal` takes the unsealed `rejoin_candidates_after_trusted_removal`.
+  `Engine::transport_peeler` is removed.
 
 ### Added
 
+- `Engine::unsealed_owed_welcomes` lists founding Welcomes a create left unsealed, for maintenance to seal (mdk#3498).
 - `Engine::own_account_self_signed_tags` reads, for this account's other leaves, a device tag that verifies under
   that leaf's own signature key, with the slot it names (mdk#3679).
 - An application message sent with `only_to_members` is encrypted only into an epoch whose member accounts it all

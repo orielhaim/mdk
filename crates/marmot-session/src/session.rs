@@ -2,8 +2,9 @@
 //!
 //! This module wires an OpenMLS-backed engine to SQLCipher storage for one
 //! Marmot account-device identity. Transport remains injected through
-//! `TransportPeeler`; actual network publish and relay sync stay above this
-//! module.
+//! `TransportPeeler` for group messages and `InboxSealer` for the account
+//! inbox, which this session owns; actual network publish and relay sync stay
+//! above this module.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -43,10 +44,10 @@ use cgka_traits::app_components::{
 };
 use cgka_traits::engine::{
     CgkaEngine, CreateGroupRequest, EpochPin, GroupEvent, GroupHydrationQuarantineReason,
-    KeyPackage, SendIntent, SendResult, SupersededIntentReport,
+    KeyPackage, OutboundWelcome, SealedWelcome, SendIntent, SendResult, SupersededIntentReport,
 };
 use cgka_traits::engine_state::PendingStateRef;
-use cgka_traits::error::{AccountDevicesActivationRefusal, EngineError};
+use cgka_traits::error::{AccountDevicesActivationRefusal, EngineError, PeelerError};
 use cgka_traits::group::{Group, Member, ProtocolProfile};
 use cgka_traits::ingest::IngestOutcome;
 use cgka_traits::maintenance::{
@@ -54,7 +55,7 @@ use cgka_traits::maintenance::{
     KeyPackageLifecycleState, MaintenanceObligation, PeriodicMaintenancePolicy,
     TransportFanoutTarget, WallClock,
 };
-use cgka_traits::peeler::TransportPeeler;
+use cgka_traits::peeler::{InboxSealer, TransportPeeler};
 use cgka_traits::storage::{
     DeviceGroupWelcomeExpectation, MaintenanceStorage, MessageStorage, OutboundFanoutStorage,
     RosterTagKey, StorageError,
@@ -134,6 +135,7 @@ pub struct SessionConfig {
     storage: SessionStorage,
     identity: Vec<u8>,
     peeler: Box<dyn TransportPeeler>,
+    sealer: Arc<dyn InboxSealer>,
     account_identity_proof_signer: Option<Arc<dyn AccountIdentityProofSigner>>,
     feature_registry: FeatureRegistry,
     supported_app_components: AppComponentSet,
@@ -164,6 +166,7 @@ impl SessionConfig {
         database_key: SqlCipherKey,
         identity: Vec<u8>,
         peeler: Box<dyn TransportPeeler>,
+        sealer: Arc<dyn InboxSealer>,
     ) -> Self {
         Self::with_session_storage(
             SessionStorage::Path {
@@ -172,6 +175,7 @@ impl SessionConfig {
             },
             identity,
             peeler,
+            sealer,
         )
     }
 
@@ -189,11 +193,13 @@ impl SessionConfig {
         opened_in: std::time::Duration,
         identity: Vec<u8>,
         peeler: Box<dyn TransportPeeler>,
+        sealer: Arc<dyn InboxSealer>,
     ) -> Self {
         Self::with_session_storage(
             SessionStorage::Open { storage, opened_in },
             identity,
             peeler,
+            sealer,
         )
     }
 
@@ -201,11 +207,13 @@ impl SessionConfig {
         storage: SessionStorage,
         identity: Vec<u8>,
         peeler: Box<dyn TransportPeeler>,
+        sealer: Arc<dyn InboxSealer>,
     ) -> Self {
         Self {
             storage,
             identity,
             peeler,
+            sealer,
             account_identity_proof_signer: None,
             feature_registry: FeatureRegistry::new(),
             supported_app_components: AppComponentSet::new(default_group_components()),
@@ -312,7 +320,9 @@ pub struct AccountDeviceSession {
     /// [`Engine::check_group_live`] first, so only the engine decides
     /// whether a group is live (mdk#2602).
     pub(super) storage: SqliteAccountStorage,
-    pub(super) recovery_peeler: Arc<dyn TransportPeeler>,
+    /// Seals and unseals the account inbox with the account signer. The
+    /// engine never calls it.
+    pub(super) sealer: Arc<dyn InboxSealer>,
     pub(super) detached_welcome_publishes: HashSet<MessageId>,
     pub(super) detached_welcome_holds: DetachedWelcomeHolds,
     pub(super) welcome_selection: Arc<futures::lock::Mutex<()>>,
@@ -420,21 +430,22 @@ pub enum PublishWork {
     },
     GroupEvolution {
         msg: TransportMessage,
-        welcomes: Vec<TransportMessage>,
+        /// Sealed and bound by the runtime before the Commit's first fanout.
+        welcomes: Vec<OutboundWelcome>,
         pending: PendingStateRef,
     },
     GroupCreated {
-        welcomes: Vec<TransportMessage>,
+        welcomes: Vec<OutboundWelcome>,
         pending: PendingStateRef,
     },
-    FoundingGroupCreated {
-        welcomes: Vec<TransportMessage>,
-    },
+    /// Founding Welcomes, sealed and bound before the effects leave the
+    /// session.
+    FoundingGroupCreated { welcomes: Vec<TransportMessage> },
     AutoPublish {
         msg: TransportMessage,
         pending: PendingStateRef,
         /// Automatic work owns its Welcomes through its own commit ACK.
-        welcomes: Vec<TransportMessage>,
+        welcomes: Vec<OutboundWelcome>,
     },
 }
 
@@ -542,7 +553,6 @@ impl AccountDeviceSession {
             .map_or_else(SharedRecorder::disabled, SharedRecorder::new);
         builder = builder.recorder(Box::new(audit.clone()));
         let mut engine = builder.build()?;
-        let recovery_peeler = engine.transport_peeler();
         if config.protocol_profile == ProtocolProfile::Current {
             let retirement = engine.retire_non_current_key_packages()?;
             tracing::info!(
@@ -597,7 +607,7 @@ impl AccountDeviceSession {
         Ok(Self {
             engine,
             storage: maintenance_storage,
-            recovery_peeler,
+            sealer: config.sealer,
             detached_welcome_publishes: HashSet::new(),
             detached_welcome_holds: Arc::new(std::sync::Mutex::new(HashMap::new())),
             welcome_selection: Arc::new(futures::lock::Mutex::new(())),
@@ -1456,7 +1466,7 @@ impl AccountDeviceSession {
         let result = self.engine.create_group(req).await;
         self.refresh_welcome_holds();
         let (group_id, result) = result?;
-        let effects = self.collect_effects(vec![result]);
+        let effects = self.create_effects(result).await?;
         tracing::debug!(
             target: TRACE_TARGET,
             method = "create_group",
@@ -1497,7 +1507,7 @@ impl AccountDeviceSession {
             method = "create_group_with_audit_context",
             "group created"
         );
-        let effects = self.collect_effects(vec![result]);
+        let effects = self.create_effects(result).await?;
         Ok(CreateGroupEffects { group_id, effects })
     }
 
@@ -1523,7 +1533,7 @@ impl AccountDeviceSession {
             .await;
         self.refresh_welcome_holds();
         let (group_id, result) = result?;
-        let effects = self.collect_effects(vec![result]);
+        let effects = self.create_effects(result).await?;
         Ok(CreateGroupEffects { group_id, effects })
     }
 
@@ -1556,7 +1566,7 @@ impl AccountDeviceSession {
             .await;
         self.refresh_welcome_holds();
         let (group_id, result) = result?;
-        let effects = self.collect_effects(vec![result]);
+        let effects = self.create_effects(result).await?;
         Ok(CreateGroupEffects { group_id, effects })
     }
 
@@ -1667,7 +1677,13 @@ impl AccountDeviceSession {
             "ingesting transport message"
         );
         let _selection = self.pause_welcome_publishes().await;
-        let outcome = self.engine.ingest(msg).await;
+        let outcome = match self.engine.ingest(msg.clone()).await {
+            Ok(IngestOutcome::InboxSealed) => {
+                let unsealed = self.sealer.unseal(&msg).await;
+                self.engine.ingest_unsealed(msg, unsealed).await
+            }
+            outcome => outcome,
+        };
         self.refresh_welcome_holds();
         let outcome = outcome?;
         let left_object_unpersisted = self.engine.last_ingest_left_object_unpersisted();
@@ -1704,6 +1720,15 @@ impl AccountDeviceSession {
             .engine
             .ingest_with_audit_context(&delivery.message, Some(transport_context))
             .await;
+        let outcome = match outcome {
+            Ok(IngestOutcome::InboxSealed) => {
+                let unsealed = self.sealer.unseal(&delivery.message).await;
+                self.engine
+                    .ingest_unsealed_with_audit_context(&delivery.message, unsealed)
+                    .await
+            }
+            outcome => outcome,
+        };
         self.refresh_welcome_holds();
         let outcome = outcome?;
         if matches!(&outcome, IngestOutcome::GroupRecovery { .. }) {
@@ -1998,9 +2023,20 @@ impl AccountDeviceSession {
 
     pub async fn retry_rejoins_after_trusted_removal(&mut self) -> SessionResult<bool> {
         let _selection = self.pause_welcome_publishes().await;
-        let result = self.engine.retry_rejoins_after_trusted_removal().await;
+        let result = self.retry_rejoins_unsealed().await;
         self.refresh_welcome_holds();
         Ok(result?)
+    }
+
+    async fn retry_rejoins_unsealed(&mut self) -> Result<bool, EngineError> {
+        let candidates = self.engine.rejoin_candidates_after_trusted_removal()?;
+        let mut unsealed = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            unsealed.push((candidate.id.clone(), self.sealer.unseal(&candidate).await));
+        }
+        self.engine
+            .retry_rejoins_after_trusted_removal(unsealed)
+            .await
     }
 
     pub fn pending_group_rejoins_for(
@@ -2029,9 +2065,25 @@ impl AccountDeviceSession {
         token: &[u8],
     ) -> SessionResult<GroupId> {
         let _selection = self.pause_welcome_publishes().await;
-        let result = self.engine.confirm_group_rejoin(welcome_id, token).await;
+        let result = self.confirm_rejoin_unsealed(welcome_id, token).await;
         self.refresh_welcome_holds();
         Ok(result?)
+    }
+
+    async fn confirm_rejoin_unsealed(
+        &mut self,
+        welcome_id: &MessageId,
+        token: &[u8],
+    ) -> Result<GroupId, EngineError> {
+        let welcome = self.engine.stored_welcome(welcome_id)?;
+        let unsealed = self
+            .sealer
+            .unseal(&welcome)
+            .await
+            .map_err(EngineError::Peeler)?;
+        self.engine
+            .confirm_group_rejoin(welcome_id, token, unsealed)
+            .await
     }
 
     pub fn decline_group_rejoin(&mut self, welcome_id: &MessageId) -> SessionResult<()> {
@@ -2367,6 +2419,38 @@ impl AccountDeviceSession {
         Ok(())
     }
 
+    /// Seal `welcomes` in order with the account signer, stopping at the
+    /// first failure.
+    pub async fn seal_welcomes(
+        &self,
+        welcomes: &[OutboundWelcome],
+    ) -> Result<Vec<SealedWelcome>, PeelerError> {
+        let mut sealed = Vec::with_capacity(welcomes.len());
+        for welcome in welcomes {
+            sealed.push(SealedWelcome {
+                local_id: welcome.local_id.clone(),
+                message: self.sealer.seal_welcome(welcome).await?,
+            });
+        }
+        Ok(sealed)
+    }
+
+    /// Replace unsealed Welcome rows with their sealed messages, writing
+    /// `fanout` in the same transaction; see `Engine::bind_sealed_welcomes`.
+    pub fn bind_sealed_welcomes(
+        &mut self,
+        sealed: &[SealedWelcome],
+        fanout: Option<&OutboundFanout>,
+    ) -> SessionResult<()> {
+        self.engine.bind_sealed_welcomes(sealed, fanout)?;
+        Ok(())
+    }
+
+    /// Founding Welcomes still owed and not sealed yet.
+    pub fn unsealed_owed_welcomes(&self) -> SessionResult<Vec<OutboundWelcome>> {
+        Ok(self.engine.unsealed_owed_welcomes()?)
+    }
+
     pub fn pending_origin_message_id(&self, pending: PendingStateRef) -> SessionResult<MessageId> {
         Ok(self.engine.pending_origin_message_id(pending)?)
     }
@@ -2688,6 +2772,41 @@ impl AccountDeviceSession {
         &self.audit
     }
 
+    /// A create's effects. Founding Welcomes are sealed and bound here, before
+    /// the effects leave the session, because the app reads their transport
+    /// ids. A seal failure does not fail the create: the group is already
+    /// canonical, and maintenance seals the Welcomes left unsealed.
+    async fn create_effects(&mut self, result: SendResult) -> SessionResult<SessionEffects> {
+        let SendResult::FoundingGroupCreated { welcomes } = result else {
+            return Ok(self.collect_effects(vec![result]));
+        };
+        let mut sealed = Vec::with_capacity(welcomes.len());
+        for welcome in &welcomes {
+            let Ok(message) = self.sealer.seal_welcome(welcome).await else {
+                tracing::warn!(
+                    target: TRACE_TARGET,
+                    method = "create_effects",
+                    unsealed = welcomes.len() - sealed.len(),
+                    "founding Welcomes left unsealed for maintenance"
+                );
+                break;
+            };
+            sealed.push(SealedWelcome {
+                local_id: welcome.local_id.clone(),
+                message,
+            });
+        }
+        self.bind_sealed_welcomes(&sealed, None)?;
+        let mut effects = self.collect_effects(Vec::new());
+        effects.publish.insert(
+            0,
+            PublishWork::FoundingGroupCreated {
+                welcomes: sealed.into_iter().map(|sealed| sealed.message).collect(),
+            },
+        );
+        Ok(effects)
+    }
+
     fn collect_effects(&mut self, results: Vec<SendResult>) -> SessionEffects {
         let mut effects = SessionEffects {
             events: self.engine.drain_events(),
@@ -2749,9 +2868,9 @@ impl AccountDeviceSession {
                 SendResult::GroupCreated { welcomes, pending } => effects
                     .publish
                     .push(PublishWork::GroupCreated { welcomes, pending }),
-                SendResult::FoundingGroupCreated { welcomes } => effects
-                    .publish
-                    .push(PublishWork::FoundingGroupCreated { welcomes }),
+                SendResult::FoundingGroupCreated { .. } => {
+                    unreachable!("founding Welcomes are sealed in create_effects")
+                }
                 SendResult::Queued {
                     group_id,
                     intent_id,
@@ -2835,6 +2954,7 @@ fn ingest_outcome_kind(outcome: &IngestOutcome) -> &'static str {
     match outcome {
         IngestOutcome::Processed => "processed",
         IngestOutcome::GroupRecovery { .. } => "account_control",
+        IngestOutcome::InboxSealed => "inbox_sealed",
         IngestOutcome::Buffered { .. } => "buffered",
         IngestOutcome::Ignored { .. } => "ignored",
         IngestOutcome::LocalState { .. } => "local_state",

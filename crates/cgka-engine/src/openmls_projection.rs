@@ -675,7 +675,8 @@ pub(crate) fn stamp_processed_own_commit_record<S: StorageProvider>(
         | StoredMessagePayload::OutboundWelcome { .. }
         | StoredMessagePayload::StagedInviteWelcome { .. }
         | StoredMessagePayload::StagedSiblingWelcome { .. }
-        | StoredMessagePayload::OutboundSiblingWelcome { .. }) => other,
+        | StoredMessagePayload::OutboundSiblingWelcome { .. }
+        | StoredMessagePayload::UnsealedWelcome { .. }) => other,
     };
     record.state = MessageState::Processed;
     record.payload = payload
