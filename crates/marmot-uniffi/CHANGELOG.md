@@ -21,6 +21,10 @@
 
 ### Added
 
+- `Marmot::account_relay_health(account_ref)` and the `RelayHealthChanged` event, with `AccountRelayHealthFfi`,
+  `RelayHealthRowFfi`, `AccountRelayWarningFfi`, `RelayListPresenceFfi`, `RelayRoleFfi`, `RelayHealthStateFfi`,
+  `RelayHealthFaultFfi`, `RelayWarningKindFfi`, `RelayWarningSeverityFfi` and `RelayRepairActionFfi`. Only the
+  `Unchecked` and `NotAllowed` states are produced yet; later versions add kinds, faults, actions and roles.
 - Swift `nextCancellable()` / `nextUpdateCancellable()` adapters for the receives generated without `throws`:
   backup restore, chat list, chats, events, group state, messages, notifications, onboarding, timeline messages and
   user search subscriptions (mdk#3670).

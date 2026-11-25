@@ -33,6 +33,9 @@
 - `submit_custom_event_to_members` and `submit_tagged_edit_for_local_send_to_members` send only to the listed member
   accounts: if the group has another member account when MDK encrypts the send, including one that joined while the
   send was queued, it is not sent, its local row is retracted, and `local_send_status` reports `RefusedNewMembers`.
+- `MarmotAppRuntime::account_relay_health` and `MarmotAppEvent::RelayHealthChanged`: the account's relay rows (roles,
+  `RelayHealthState`, policy fault, liveness) and its inbox warnings, from held relay lists and the dial policy only.
+  Only the `Unchecked` and `NotAllowed` states are produced yet.
 - `submit_thread_message` and `submit_tagged_sticker` accept a client token and return before relay publication.
 - `MarmotAppRuntime::invite_deliveries` and `MarmotAppEvent::InviteDeliveryChanged` (mdk#1706): one `InviteDelivery`
   per group and invited account, rolled up from the session's per-Welcome delivery records. `RelayAccepted` means a
