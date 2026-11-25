@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Implement `EntropySource::fill_bytes` to supply entropy (mdk#3497). The default `next_u64` reads eight
+  little-endian bytes from that source.
 - `RosterTagKeyStorage` gains `renew_roster_tag_keys`, which moves the sighting time of a slot's unexpired keys in one
   step and keeps their order (mdk#3679).
 - `SendIntent::AppMessage` gains `only_to_members`: the member accounts the payload may reach. The engine checks the
@@ -18,6 +20,7 @@
 
 ### Added
 
+- `OsEntropy` and `SystemWallClock` are available from `cgka_traits` for production random bytes and timestamps.
 - `agent_events`: the tags of kinds 1201 and 1202 (marmot-agents D-076), `AGENT_EVENT_MAX_BYTES`, and the parsers
   `AgentItem::from_tags` and `AgentRequest::from_tags` with the alert rule `AgentItem::alerts`.
   An item's `v` and `seq` are at most `i64::MAX`.

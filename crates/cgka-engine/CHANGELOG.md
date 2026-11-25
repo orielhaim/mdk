@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Implement `EntropySource::fill_bytes` to supply engine randomness. The system default is `OsEntropy`.
+  Direct callers of `Identity::load_or_generate` pass the MLS crypto provider used to generate new signers (mdk#3497).
 - `Engine::own_account_leaves_tagged_by` returns each leaf's signature key with the slot its tag read as.
 - `Engine::queue_app_message_with_audit_context` takes the intent's `only_to_members`.
 
@@ -87,8 +89,8 @@
   rollback retires.
 - `EngineBuilder::monotonic_clock` installs the `MonotonicClock` that times the engine's in-process budgets,
   deadlines and duration metrics, so a test moves time forward without sleeping (mdk#3496). An engine built without
-  it runs on the new `SystemMonotonicClock`. `SystemWallClock` and `OsMaintenanceRandom`, the other defaults, are
-  public, and all three are re-exported from the crate root.
+  it runs on the new `SystemMonotonicClock`. The system defaults for both clocks and maintenance randomness are
+  public and re-exported from the crate root.
 - `Engine::send_host_change_with_audit_context` sends a host's group change, and `host_change_kind` names the change
   a pending commit carries, for its fanout to store (mdk#2332).
 - `Engine::publish_not_delivered` rolls back a pending commit the session gave up because it reached no relay

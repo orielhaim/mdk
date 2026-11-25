@@ -14,6 +14,9 @@
 
 ### Changed
 
+- Rust callers can inject an `EntropySource` for engine draws and kind-445 sealing and signing (mdk#3497).
+  `NostrMlsPeeler::new` also takes a wall clock; use `Default` for system sources. Pass a clock to
+  `NostrTransportEvent::new_unsigned`, or keep using `new_unsigned_at` when the timestamp is already known.
 - Maintenance queues an MLS self-update as soon as it detects stale chat capabilities, instead of scheduling it up to
   five days out. The quiet period, contention jitter, and commit safety checks still apply.
 

@@ -2809,6 +2809,7 @@ impl MarmotApp {
                 KIND_NOSTR_CONTACT_LIST,
                 Vec::new(),
                 String::new(),
+                &cgka_traits::SystemWallClock,
             ),
             required_acks: 1,
         });
@@ -2819,6 +2820,7 @@ impl MarmotApp {
                 KIND_NOSTR_METADATA,
                 Vec::new(),
                 serde_json::to_string(&nostr_directory::profile_content_json(profile))?,
+                &cgka_traits::SystemWallClock,
             ),
             required_acks: 1,
         });
@@ -3034,6 +3036,7 @@ impl MarmotApp {
             KIND_NOSTR_METADATA,
             Vec::new(),
             serde_json::to_string(&nostr_directory::profile_content_json(profile))?,
+            &cgka_traits::SystemWallClock,
         );
         events.push(
             self.sign_replaceable_identity_event(label, nostr_signer.clone(), &profile_event)
@@ -5454,7 +5457,10 @@ impl MarmotApp {
         let signer = self.account_signer_for_summary(&account)?;
         let account_id = MemberId::new(hex::decode(&account.account_id_hex)?);
         let nostr_signer = signer.as_nostr_signer();
-        let peeler = NostrMlsPeeler::new().with_welcome_signer_arc(nostr_signer.clone());
+        let entropy = Arc::new(cgka_traits::OsEntropy);
+        let clock = Arc::new(cgka_traits::SystemWallClock);
+        let peeler = NostrMlsPeeler::new(entropy.clone(), clock.clone())
+            .with_welcome_signer_arc(nostr_signer.clone());
         #[cfg(test)]
         let audit_v5_peel_slot = self
             .audit_v5_peel_slot
@@ -5518,6 +5524,7 @@ impl MarmotApp {
             peeler,
         )
         .account_identity_proof_signer(signer.as_proof_signer())
+        .maintenance_sources(clock, entropy)
         .feature_registry(app_feature_registry())
         .supported_app_components(self.supported_app_component_ids());
         if defer_group_hydration {
@@ -6333,6 +6340,7 @@ impl MarmotApp {
                         vec!["k".into(), KIND_MARMOT_KEY_PACKAGE.to_string()],
                     ],
                     String::new(),
+                    &cgka_traits::SystemWallClock,
                 ),
                 required_acks: 1,
             });

@@ -12571,6 +12571,7 @@ mod tests {
             10_002,
             vec![vec!["r".into(), "wss://relay.example".into()]],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
         let signed = sign_transport_event_for_publish(Arc::new(keys), &unsigned)
             .await
@@ -12618,12 +12619,14 @@ mod tests {
             5,
             vec![vec!["e".into(), "11".repeat(32)]],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
         let event_b = NostrTransportEvent::new_unsigned(
             keys_b.public_key().to_hex(),
             5,
             vec![vec!["e".into(), "22".repeat(32)]],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
 
         let (signed_a, signed_b) = tokio::join!(
@@ -12644,6 +12647,7 @@ mod tests {
             10_002,
             vec![vec!["r".into(), "wss://relay.example".into()]],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
 
         // EventBuilder obtains the signer's public key before constructing
@@ -14973,6 +14977,7 @@ mod tests {
                 vec!["k".into(), KIND_MARMOT_KEY_PACKAGE.to_string()],
             ],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
 
         let outcome = sdk
@@ -15151,6 +15156,7 @@ mod tests {
                 vec!["k".into(), KIND_MARMOT_KEY_PACKAGE.to_string()],
             ],
             String::new(),
+            &cgka_traits::SystemWallClock,
         );
 
         let err = sdk
